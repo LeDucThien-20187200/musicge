@@ -35,7 +35,7 @@ class LocalSongsPage extends StatelessWidget {
             children: [
               Container(
                 margin: const EdgeInsets.only(left: 10.0, right: 10.0),
-                height: 200.0,
+                height: 201.0,
                 width: 200.0,
                 child: Card(
                   shape: RoundedRectangleBorder(
