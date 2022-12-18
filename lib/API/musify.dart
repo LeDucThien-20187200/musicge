@@ -95,3 +95,160 @@ Future<List<dynamic>> getUserPlaylists() async {
   return playlistsByUser;
 }
 
+addUserPlaylist(String playlistId) {
+  userPlaylists.add(playlistId);
+  addOrUpdateData("user", "playlists", userPlaylists);
+}
+
+removeUserPlaylist(String playlistId) {
+  userPlaylists.remove(playlistId.toString());
+  addOrUpdateData("user", "playlists", userPlaylists);
+}
+
+addUserLikedSong(songId) async {
+  userLikedSongsList
+      .add(await getSongDetails(userLikedSongsList.length, songId));
+  addOrUpdateData("user", "likedSongs", userLikedSongsList);
+}
+
+removeUserLikedSong(songId) {
+  userLikedSongsList.removeWhere((song) => song["ytid"] == songId);
+  addOrUpdateData("user", "likedSongs", userLikedSongsList);
+}
+
+bool isSongAlreadyLiked(songId) {
+  return userLikedSongsList.where((song) => song["ytid"] == songId).isNotEmpty;
+}
+
+Future<List> getPlaylists([int? playlistsNum]) async {
+  if (playlists.isEmpty) {
+    final localplaylists =
+        json.decode(await rootBundle.loadString('assets/db/playlists.db.json'));
+    playlists = localplaylists;
+  }
+
+  if (playlistsNum != null) {
+    if (suggestedPlaylists.isEmpty) {
+      suggestedPlaylists =
+          (playlists.toList()..shuffle()).take(playlistsNum).toList();
+    }
+    return suggestedPlaylists;
+  } else {
+    return playlists;
+  }
+}
+
+Future getSongsFromPlaylist(playlistid) async {
+  var playlistSongs = [];
+  var index = 0;
+  await for (final song in yt.playlists.getVideos(playlistid)) {
+    playlistSongs.add(
+      returnSongLayout(
+        index,
+        song.id.toString(),
+        formatSongTitle(
+          song.title.split('-')[song.title.split('-').length - 1],
+        ),
+        song.thumbnails.standardResUrl,
+        song.thumbnails.lowResUrl,
+        song.thumbnails.maxResUrl,
+        song.title.split('-')[0],
+      ),
+    );
+    index += 1;
+  }
+
+  return playlistSongs;
+}
+
+setActivePlaylist(List plist) async {
+  List<MediaItem> activePlaylist = [];
+
+  if (plist is List<SongModel>) {
+    for (var song in plist) {
+      activePlaylist.add(songModelToMediaItem(song, song.data.toString()));
+    }
+  } else {
+    for (var i = 0; i < plist.length && i < 20; i++) {
+      final songUrl = await getSongUrl(plist[i]["ytid"]);
+      activePlaylist.add(mapToMediaItem(plist[i], songUrl));
+    }
+  }
+
+  MyAudioHandler().addQueueItems(activePlaylist);
+
+  play();
+}
+
+Future getPlaylistInfoForWidget(dynamic id) async {
+  var searchPlaylist = playlists.where((list) => list["ytid"] == id).toList();
+
+  if (searchPlaylist.isEmpty) {
+    final usPlaylists = await getUserPlaylists();
+    searchPlaylist = usPlaylists.where((list) => list["ytid"] == id).toList();
+  }
+
+  var playlist = searchPlaylist[0];
+
+  if (playlist["list"].length == 0) {
+    searchPlaylist[searchPlaylist.indexOf(playlist)]["list"] =
+        await getSongsFromPlaylist(playlist["ytid"]);
+  }
+
+  return playlist;
+}
+
+Future getSongUrl(dynamic songId) async {
+  final manifest = await yt.videos.streamsClient.getManifest(songId);
+  return manifest.audioOnly.withHighestBitrate().url.toString();
+}
+
+Future getSongStream(dynamic songId) async {
+  final manifest = await yt.videos.streamsClient.getManifest(songId);
+  return manifest.audioOnly.withHighestBitrate();
+}
+
+Future getSongDetails(dynamic songIndex, dynamic songId) async {
+  final song = await yt.videos.get(songId);
+  return returnSongLayout(
+    songIndex,
+    song.id.toString(),
+    formatSongTitle(song.title.split('-')[song.title.split('-').length - 1]),
+    song.thumbnails.standardResUrl,
+    song.thumbnails.lowResUrl,
+    song.thumbnails.maxResUrl,
+    song.title.split('-')[0],
+  );
+}
+
+getLocalSongs() async {
+  // DEFAULT:
+  // SongSortType.TITLE,
+  // OrderType.ASC_OR_SMALLER,
+  // UriType.EXTERNAL,
+  if (await Permission.storage.request().isGranted) {
+    localSongs = await _audioQuery.querySongs();
+  }
+  return localSongs;
+}
+
+Future getSongLyrics(String artist, String title) async {
+  if (_lastLyricsUrl !=
+      'https://api.lyrics.ovh/v1/$artist/${title.split(" (")[0].split("|")[0].trim()}') {
+    lyrics.value = "null";
+    _lastLyricsUrl =
+        'https://api.lyrics.ovh/v1/$artist/${title.split(" (")[0].split("|")[0].trim()}';
+    try {
+      final lyricsApiRes = await DefaultCacheManager().getSingleFile(
+        _lastLyricsUrl,
+        headers: {"Accept": "application/json"},
+      );
+      final lyricsResponse =
+          await json.decode(await lyricsApiRes.readAsString());
+      lyrics.value = lyricsResponse['lyrics'].toString();
+    } catch (e) {
+      lyrics.value = "not found";
+      debugPrint(e.toString());
+    }
+  }
+}
